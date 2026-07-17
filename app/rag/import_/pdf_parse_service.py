@@ -1,7 +1,19 @@
+import shutil
+import time
+
+import requests
+
+from app.infra.document_parse import mineru_gateway
 from app.process.import_.agent.state import ImportGraphState
-from app.shared.config import mineru_config
 from app.shared.runtime.logger import step_log,logger,PROJECT_ROOT
 from pathlib import Path
+from app.shared.utils.path_util import PROJECT_ROOT
+from app.rag.import_.config import (
+    MINERU_DOWNLOAD_TIMEOUT_SECONDS,
+    MINERU_MODEL_VERSION,
+    MINERU_POLL_INTERVAL_SECONDS,
+    MINERU_POLL_TIMEOUT_SECONDS,
+)
 
 # pdf service 总入口 串联三个子函数
 @step_log("parse_pdf_to_markdown")
@@ -13,8 +25,15 @@ def parse_pdf_to_markdown(state: ImportGraphState) -> ImportGraphState:
     3. 获取 Markdown 路径和正文内容
     4. 回写 md_path / md_content / local_dir
     """
-    # 先校验PDF路径和输出目录，避免把非法输入送进解析服务
+    # 先校验 PDF 路径和输出目录，避免把非法输入送进解析服务。
     pdf_path_obj, local_dir_path_obj = validate_pdf_paths(state)
+    # 上传 PDF 到 MinerU，并轮询直到服务端返回最终压缩包地址。
+    zip_url = upload_pdf_and_poll(pdf_path_obj)
+    logger.info(f"minerU返回的zip地址:{zip_url}")
+    # 下载结果包并提取最终 Markdown 文件。
+    md_path_obj = download_and_extract_markdown(zip_url, local_dir_path_obj, pdf_path_obj.stem)
+    state["md_path"] = str(md_path_obj)
+    state["md_content"] = md_path_obj.read_text(encoding="utf-8")
     return state
 
 # 子函数1 路径检验
@@ -79,7 +98,7 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
         "Authorization": f"Bearer {mineru_gateway.api_key}",
     }
 
-    # 3. 构造请求参数：文件名 + 使用的模型版本
+    # 3. 构造请求参数：文件名+使用的模板版本
     payload = {
         "files": [{"name": pdf_path_obj.stem}],
         "model_version": MINERU_MODEL_VERSION
@@ -106,7 +125,7 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
         # session.trust_env = False 是告诉 requests ： 不要信任系统环境变量里的代理、证书、认证等配置 。
         # session.trust_env = False 的意思就是：
         # - 别用系统里自动带来的代理、证书、账号配置
-		# - 只按我这个代码里写的内容发请求
+        # - 只按我这个代码里写的内容发请求
         # 上传的地址是, 预签名上传地址 , OSS / S3 / 对象存储直传地址 非常脆弱
         session.trust_env = False
         upload_response = session.put(file_upload_url, data=pdf_path_obj.read_bytes())
@@ -166,3 +185,100 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
         # 任务仍在处理中 → 等待后继续轮询
         logger.warning(f"解析正在进行中,状态:{extract_result_state}!")
         time.sleep(interval_time)
+
+        # 10. 获取解析任务状态
+        extract_result = poll_response_dict["data"]["extract_result"][0]
+        extract_result_state = extract_result["state"]
+
+        # 任务完成 → 返回下载地址
+        if extract_result_state == "done":
+            extract_result_url = extract_result["full_zip_url"]
+            if not extract_result_url:
+                raise RuntimeError("已经完成了解析,但是zip地址为空!!")
+            return extract_result_url
+
+        # 任务失败 → 抛出异常
+        if extract_result_state == "failed":
+            raise RuntimeError(f"已经完成了解析,但是失败了!!失败信息:{extract_result['err_msg']}")
+
+        # 任务仍在处理中 → 等待后继续轮询
+        logger.warning(f"解析正在进行中,状态:{extract_result_state}!")
+        time.sleep(interval_time)
+
+# 子函数3 下载与解压
+@step_log("download_and_extract_markdown")
+def download_and_extract_markdown(zip_url: str, local_dir_path_obj: Path, stem: str) -> Path:
+    """
+    下载 MinerU 解析完成的 ZIP 压缩包，解压并提取出标准的 MD 文件
+    1. 从 zip_url 下载解析结果压缩包
+    2. 解压到指定目录
+    3. 自动查找最合适的 MD 文件（优先同名 → full.md → 第一个）
+    4. 重命名为统一规范的文件名并返回
+
+    Args:
+        zip_url: MinerU 返回的 ZIP 下载地址
+        local_dir_path_obj: 本地存放解压文件的目录
+        stem: 原始 PDF 的文件名（不带后缀，用于重命名 MD）
+
+    Returns:
+        Path: 最终整理好的 MD 文件路径对象
+    """
+    # ---------------------- 1. 下载 ZIP 压缩包 ----------------------
+    # 修改前：requests.get() 会自动继承 Windows 系统代理（本机为 127.0.0.1:7890）。
+    # response = requests.get(zip_url, timeout=MINERU_DOWNLOAD_TIMEOUT_SECONDS)
+
+    # 修改后：为本次 CDN 下载单独创建 Session，并关闭系统代理配置的继承，
+    # 避免本地代理在 HTTPS/TLS 通信过程中提前断开连接。
+    # trust_env=False 只关闭环境代理/认证配置的继承，不会关闭 HTTPS 证书校验。
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.get(
+            zip_url,
+            timeout=MINERU_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+        # 新增 HTTP 状态检查：非 2xx 响应立即报错，避免把错误页面保存成 ZIP
+        # 后再产生难以理解的解压异常。
+        response.raise_for_status()
+    # 拼接 ZIP 保存路径：输出目录 + 文件名_result.zip
+    zip_path_obj = local_dir_path_obj / f"{stem}_result.zip"
+    # 将二进制内容写入 ZIP 文件
+    zip_path_obj.write_bytes(response.content)
+
+    # ---------------------- 2. 解压 ZIP 文件 ----------------------
+    # 解压目录 = 输出目录 / PDF 文件名（无后缀）
+    extract_path_obj = local_dir_path_obj / stem
+    # 如果解压目录已存在，先删除（防止旧文件干扰）
+    if extract_path_obj.exists():
+        shutil.rmtree(extract_path_obj)
+    # 创建新的解压目录
+    extract_path_obj.mkdir(parents=True, exist_ok=True)
+    # 解压 ZIP 包到目标目录
+    shutil.unpack_archive(zip_path_obj, extract_path_obj)
+
+    # ---------------------- 3. 查找所有 MD 文件 ----------------------
+    # 递归查找解压目录下所有 .md 文件
+    md_file_list = list(extract_path_obj.rglob("*.md"))
+    # 没有找到 MD 文件则抛出异常
+    if not md_file_list:
+        raise FileNotFoundError(f"文件解压失败,在:{extract_path_obj}没有任何md文件!")
+
+    # ---------------------- 4. 按优先级选择 MD 文件 ----------------------
+    # 优先级 1：找和 PDF 同名的 MD（最标准）
+    for md_file in md_file_list:
+        if md_file.stem == stem:
+            return md_file
+
+    # 优先级 2：找不到同名，找 full.md（MinerU 默认完整导出文件）
+    target_md_obj = None
+    for md_file in md_file_list:
+        if md_file.name.lower() == "full.md":
+            target_md_obj = md_file
+            break
+
+    # 优先级 3：还找不到，直接取第一个 MD
+    if not target_md_obj:
+        target_md_obj = md_file_list[0]
+
+    # ---------------------- 5. 重命名为统一规范名称 ----------------------
+    # 将选中的 MD 重命名为 {stem}.md（和 PDF 同名）
+    return target_md_obj.rename(target_md_obj.with_name(f"{stem}.md"))

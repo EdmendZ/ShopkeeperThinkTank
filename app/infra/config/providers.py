@@ -16,10 +16,12 @@ class InfraConfig:
     embedding: object = field(default_factory=lambda: embedding_config)
     reranker: object = field(default_factory=lambda: reranker_config)
     mcp: object = field(default_factory=lambda: mcp_config)
-    milvus_config: object = field(default_factory=lambda: milvus_config)
-    mineru_config: object = field(default_factory=lambda: mineru_config)
-    minio_config: object = field(default_factory=lambda: minio_config)
+    milvus: object = field(default_factory=lambda: milvus_config)
+    mineru: object = field(default_factory=lambda: mineru_config)
+    minio: object = field(default_factory=lambda: minio_config)
 
     infra_config: object = field(default_factory=lambda: settings)
 
-    print(infra_config.app.import_app_name)
+infra_config = InfraConfig()
+
+print(infra_config.app.import_app_name)
