@@ -18,10 +18,12 @@ from dotenv import load_dotenv
 from loguru import logger
 
 
-# -------------------------- 第一步：加载.env配置文件 --------------------------
+# -------------------------- 第一步：加载 .env 配置文件 --------------------------
+# 将项目环境变量写入当前进程；未配置的项目会继续使用下方定义的默认值。
 load_dotenv()
 
-# -------------------------- 第二步：读取.env配置（带默认值，防止配置缺失） --------------------------
+# -------------------------- 第二步：读取 .env 配置（带默认值，防止配置缺失） --------------------------
+# 布尔开关仅在值（忽略大小写）为 "true" 时开启；日志等级统一转为大写以匹配 Loguru 的等级名称。
 LOG_CONSOLE_ENABLE = os.getenv("LOG_CONSOLE_ENABLE", "True").lower() == "true"
 LOG_CONSOLE_LEVEL = os.getenv("LOG_CONSOLE_LEVEL", "INFO").upper()
 LOG_FILE_ENABLE = os.getenv("LOG_FILE_ENABLE", "True").lower() == "true"
@@ -29,12 +31,15 @@ LOG_FILE_LEVEL = os.getenv("LOG_FILE_LEVEL", "INFO").upper()
 LOG_FILE_RETENTION = os.getenv("LOG_FILE_RETENTION", "7 days")
 
 # -------------------------- 第三步：定义日志路径（自动推导项目根） --------------------------
+# logger.py 位于 app/shared/runtime；从当前文件的绝对路径向上四级得到项目根目录，不依赖启动命令所在目录。
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 LOG_DIR = PROJECT_ROOT / "logs"
+# {time:YYYYMMDD} 是 Loguru 在写入时解析的日期模板，LOG_FILE_PATH 并非固定某一天的实际文件名。
 LOG_FILE_NAME = "app_{time:YYYYMMDD}.log"
 LOG_FILE_PATH = LOG_DIR / LOG_FILE_NAME
 
 # -------------------------- 第四步：定义日志格式（彩色、结构化、易读） --------------------------
+# 依次输出时间、等级、模块名、函数名、行号和消息；<green>/<cyan>/<level> 为 Loguru 的终端颜色标记。
 LOG_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level: <8}</level> | "
@@ -55,43 +60,48 @@ def init_logger():
     # 1. 移除loguru默认的控制台输出
     logger.remove()
 
-    # 2. 配置控制台输出（若.env开启）
+    # 2. 配置控制台输出（若 .env 开启）；控制台与文件可设置不同的最低输出等级。
     if LOG_CONSOLE_ENABLE:
         logger.add(
             sink=sys.stdout,
             level=LOG_CONSOLE_LEVEL,
             format=LOG_FORMAT,
             colorize=True,
+            # 通过队列串行写入，适用于多线程和异步场景，避免日志交错。
             enqueue=True
         )
 
-    # 3. 配置文件输出（若.env开启）
+    # 3. 配置文件输出（若 .env 开启）；目录不存在时自动创建。
     if LOG_FILE_ENABLE:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         logger.add(
             sink=LOG_FILE_PATH,
             level=LOG_FILE_LEVEL,
             format=LOG_FORMAT,
+            # 每日零点创建新日志文件，并依据 .env 的保留策略清理过期日志。
             rotation="00:00",
             retention=LOG_FILE_RETENTION,
+            # 使用 UTF-8 避免中文乱码；队列写入避免并发场景下文件内容交错。
             encoding="utf-8",
             enqueue=True,
+            # 异常日志附带增强的调用栈和变量诊断信息，便于排查问题。
             backtrace=True,
             diagnose=True
         )
 
     return logger
 
-# -------------------------- 第六步：初始化并终极修正全局logger --------------------------
+# -------------------------- 第六步：初始化并修正全局 logger 的调用位置 --------------------------
 base_logger = init_logger()
 
+
 def fix_log_position(record):
-    """遍历调用栈，跳过loguru内部帧+工具类自身帧，提取业务代码实际调用位置"""
+    """将日志显示的位置修正为业务调用方，而不是 Loguru 或当前封装模块内部。"""
+    # 从最近调用栈开始，跳过 Loguru 内部帧及本文件自身帧，定位第一处业务代码。
     for frame in inspect.stack():
-        # 终极过滤：排除loguru内部 + 排除工具类logger.py自身，直接定位业务模块
         if ("_logger.py" in frame.filename or frame.function == "_log") or "logger.py" in frame.filename:
             continue
-        # 更新日志字段为业务代码实际位置
+        # 同时处理 Windows（反斜杠）与 POSIX（正斜杠）路径，提取仅用于日志展示的文件名。
         record.update(
             name=frame.filename.split("/")[-1].split("\\")[-1],
             function=frame.function,
@@ -99,7 +109,8 @@ def fix_log_position(record):
         )
         break
 
-# 应用终极修复，导出全局可用的logger
+
+# patch 会在每条日志生成前执行位置修正；导出的 logger 可供业务模块直接导入使用。
 logger = base_logger.patch(fix_log_position)
 
 
@@ -108,18 +119,23 @@ import time
 from typing import Mapping
 
 def _trace_id(state) -> str:
+    """从状态映射中按 session_id、task_id 的优先级提取追踪 ID，缺失时返回 "-"。"""
     if isinstance(state, Mapping):
         return str(state.get("session_id") or state.get("task_id") or "-")
     return "-"
 
+
 def node_log(node_name: str):
+    """为首个参数为 state 的节点函数记录开始、结束、耗时和异常日志。"""
     def deco(func):
+        # 保留被装饰函数的名称、文档等元数据，便于调试和框架识别。
         @wraps(func)
         def wrapper(state, *args, **kwargs):
             trace_id = _trace_id(state)
             start_ts = time.time()
             logger.info(f"[{node_name}] 节点开始，追踪ID={trace_id}")
             try:
+                # 耗时仅覆盖实际业务函数执行；异常记录后会继续抛出，不改变原有业务语义。
                 result = func(state, *args, **kwargs)
                 cost_ms = int((time.time() - start_ts) * 1000)
                 logger.info(f"[{node_name}] 节点完成，追踪ID={trace_id}，耗时={cost_ms}ms")
@@ -130,10 +146,11 @@ def node_log(node_name: str):
         return wrapper
     return deco
 
+
 def step_log(step_name: str):
     """
-    步骤日志装饰器：
-    - 自动打印 步骤开始 / 步骤完成 / 步骤异常（含堆栈）
+    步骤日志装饰器：适用于普通函数，不要求首个参数为 state。
+    - 自动打印步骤开始 / 步骤完成 / 步骤异常（含堆栈）
     - 不吞异常，保持原有业务语义
     """
     def deco(func):
@@ -152,7 +169,8 @@ def step_log(step_name: str):
         return wrapper
     return deco
 
-# -------------------------- 测试代码（验证修复效果） --------------------------
+# -------------------------- 测试代码（仅直接运行本文件时执行） --------------------------
+# 用于人工验证日志等级、输出路径及异常堆栈，不属于业务初始化流程。
 if __name__ == '__main__':
     # 【debug】开发调试用，记录细节、变量，上线一般关闭
     logger.debug("【调试】进入主程序入口，开始初始化日志")
