@@ -128,9 +128,13 @@ def _trace_id(state) -> str:
 def node_log(node_name: str):
     """为首个参数为 state 的节点函数记录开始、结束、耗时和异常日志。"""
     def deco(func):
+        """接收被装饰节点函数，并返回增加日志行为后的包装函数。"""
+
         # 保留被装饰函数的名称、文档等元数据，便于调试和框架识别。
         @wraps(func)
         def wrapper(state, *args, **kwargs):
+            """执行原节点函数，同时记录追踪 ID、耗时和异常堆栈。"""
+
             trace_id = _trace_id(state)
             start_ts = time.time()
             logger.info(f"[{node_name}] 节点开始，追踪ID={trace_id}")
@@ -154,8 +158,12 @@ def step_log(step_name: str):
     - 不吞异常，保持原有业务语义
     """
     def deco(func):
+        """接收任意业务函数，并返回带步骤日志的包装函数。"""
+
         @wraps(func)
         def wrapper(*args, **kwargs):
+            """透传全部参数执行原函数，并在异常后重新抛出。"""
+
             start_ts = time.time()
             logger.info(f"[{step_name}] 步骤开始")
             try:

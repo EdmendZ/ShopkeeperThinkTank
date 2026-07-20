@@ -1,3 +1,5 @@
+"""导入图入口节点：记录任务进度，并委托入口服务识别 MD/PDF 类型。"""
+
 import json
 
 from app.process.import_.agent.state import ImportGraphState
@@ -10,12 +12,14 @@ def node_entry(state:ImportGraphState) -> ImportGraphState:
     节点: 入口节点 (node_entry)
     为什么叫这个名字: 作为图的 Entry Point，负责接收外部输入并决定流程走向。
     """
+    # 节点只做编排：先记“进行中”，再调用领域服务，最后记“已完成”。
     add_running_task(state["task_id"], "node_entry")
     # 这里仅负责识别文件类型和补齐基础状态，不承担业务逻辑。
     state = resolve_input_file(state)
     add_done_task(state["task_id"], "node_entry")
     return state
 
+# 该条件仅在直接运行本文件时成立；被 main_graph 导入时不会执行下面的示例。
 if __name__ == '__main__':
     from app.shared.runtime.logger import logger
     from app.process.import_.agent.state import create_default_state

@@ -1,3 +1,9 @@
+"""提示词文件加载与变量渲染工具。
+
+业务服务按名称读取 ``app/resources/prompts`` 下的模板，并用关键字参数替换
+``str.format`` 占位符；模块本身不调用模型。
+"""
+
 from app.shared.runtime.logger import logger, PROJECT_ROOT
 
 

@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ClaudeCodeEditorTabs">
-    <option name="activeSessionId" value="bd5f283f-b54e-4df3-9aa6-a25f63c70fbb" />
+    <option name="activeSessionId" value="956cc27f-dc62-4d3e-858e-4054714923e6" />
     <option name="openSessionIds">
       <list>
-        <option value="bd5f283f-b54e-4df3-9aa6-a25f63c70fbb" />
+        <option value="956cc27f-dc62-4d3e-858e-4054714923e6" />
       </list>
     </option>
     <option name="sessionPaths">
       <map>
-        <entry key="bd5f283f-b54e-4df3-9aa6-a25f63c70fbb" value="/switch-account" />
+        <entry key="956cc27f-dc62-4d3e-858e-4054714923e6" value="/sessions/new" />
       </map>
     </option>
     <option name="sessionTitles">
       <map>
-        <entry key="bd5f283f-b54e-4df3-9aa6-a25f63c70fbb" value="梳理.env里的内容 并添加注释" />
+        <entry key="956cc27f-dc62-4d3e-858e-4054714923e6" value="Claude Code" />
       </map>
     </option>
   </component>

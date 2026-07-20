@@ -9,6 +9,12 @@ from fastapi import Request
 
 
 class SSEEvent:
+    """集中定义前后端约定的 SSE 事件名称。
+
+    这些是类属性而不是实例属性，调用方可直接使用 ``SSEEvent.PROGRESS``；
+    ``CLOSE`` 是内部哨兵事件，不会作为普通业务结果继续推送。
+    """
+
     READY = "ready"         # 连接建立
     PROGRESS = "progress"   # 任务节点进度
     DELTA = "delta"         # LLM 流式输出增量

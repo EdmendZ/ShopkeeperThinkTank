@@ -23,6 +23,18 @@ def get_path_dir(ps:int = 0)->Path:
 
 
 def get_project_root(identifier: str = ".env") -> Path:
+    """从环境变量或向上遍历目录定位项目根路径。
+
+    Args:
+        identifier: 用于识别项目根目录的标志文件，默认是 ``.env``。
+
+    Returns:
+        包含标志文件的目录；若设置了有效的 ``PROJECT_ROOT``，优先返回该路径。
+
+    Raises:
+        FileNotFoundError: 环境变量无效且遍历到文件系统根仍未找到标志文件。
+    """
+
     # 第一步：优先读取环境变量（生产环境用）
     env_root = os.getenv("PROJECT_ROOT")
     if env_root and Path(env_root).absolute().exists():
@@ -30,6 +42,7 @@ def get_project_root(identifier: str = ".env") -> Path:
 
     # 第二步：加载根目录的.env文件（为了后续逻辑，也可省略）
     current_dir = Path(__file__).absolute().parent
+    # 当目录等于自己的 parent 时已经到达盘符根目录，循环应停止。
     while current_dir != current_dir.parent:
         if (current_dir / identifier).exists():
             load_dotenv(dotenv_path=current_dir / identifier)

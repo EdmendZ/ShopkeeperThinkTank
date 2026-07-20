@@ -1,12 +1,12 @@
+"""导入流程的文档切分占位模块，预留从 Markdown 生成知识切块的接口。"""
+
 from app.process.import_.agent.state import ImportGraphState
 
 
 def split_document(state: ImportGraphState) -> ImportGraphState:
-    """
-    文档切分服务：
-    1. 按标题层级做一级粗切
-    2. 对超长文本做二次细切
-    3. 构造 chunks 列表
-    4. 回写 chunks
+    """原样返回导入状态。
+
+    当前实现尚未读取 Markdown、执行标题切分或回写 ``chunks``，仅为导入图保留
+    类型一致的服务边界。
     """
     return state

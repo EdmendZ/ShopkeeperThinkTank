@@ -175,6 +175,12 @@ def update_task_status(task_id: str, status_name: str, push_queue: bool = False)
 
 
 def task_push_queue(task_id: str):
+    """把任务状态、已完成节点和运行中节点打包为一次 SSE 进度事件。
+
+    Side Effects:
+        向 ``task_id`` 对应的会话队列写入消息；没有队列时由 SSE 工具打印警告。
+    """
+
     push_to_session(task_id, "progress", {
         "status": get_task_status(task_id),
         "done_list": get_done_task_list(task_id),
@@ -182,8 +188,13 @@ def task_push_queue(task_id: str):
     })
 
 
-#
 def clear_task(task_id: str):
+    """清除一个任务在四个内存字典中的全部追踪数据。
+
+    ``dict.pop(key, None)`` 在键不存在时返回 ``None``，因此重复清理不会抛出
+    ``KeyError``。
+    """
+
     _tasks_running_list.pop(task_id, None)
     _tasks_done_list.pop(task_id, None)
     _tasks_status.pop(task_id, None)

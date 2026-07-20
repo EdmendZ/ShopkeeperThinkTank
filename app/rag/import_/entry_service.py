@@ -1,3 +1,5 @@
+"""导入入口服务：校验本地文件后缀，并初始化后续 LangGraph 节点使用的状态字段。"""
+
 import json
 from pathlib import Path
 
@@ -22,7 +24,7 @@ def resolve_input_file(state: dict) -> ImportGraphState:
     Returns:
         ImportGraphState: 补全文件信息后的完整状态对象
     """
-    # 1. 获取文件本地路径
+    # dict.get 在键不存在时返回 None，不会像 state["local_file_path"] 那样抛 KeyError。
     local_file_path = state.get("local_file_path")
 
     # 2. 校验文件路径是否为空，为空则直接结束流程
@@ -50,7 +52,7 @@ def resolve_input_file(state: dict) -> ImportGraphState:
         )
         return state
 
-    # 4. 自动提取文件标题（不带后缀）
+    # Path.stem 只保留最后一级文件名并去掉后缀，例如 /data/a.pdf -> a。
     state["file_title"] = Path(local_file_path).stem
 
     # 5. 返回补全后的状态

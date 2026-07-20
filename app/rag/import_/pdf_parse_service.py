@@ -1,3 +1,5 @@
+"""PDF 解析服务：校验路径，调用 MinerU，轮询任务并下载、解压 Markdown 结果。"""
+
 import shutil
 import time
 
@@ -167,7 +169,8 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
                 f"轮询业务异常,错误码:{poll_response_dict['code']},失败信息:{poll_response_dict['msg']}"
             )
 
-        # 10. 获取解析任务状态
+        # 当前源码随后又对同一份轮询结果重复判断一次；这里保留原行为，仅指出它会
+        # 在“仍处理中”时再次等待。实际重构时可再评估是否合并重复段落。
         extract_result = poll_response_dict["data"]["extract_result"][0]
         extract_result_state = extract_result["state"]
 

@@ -7,6 +7,7 @@ import os
 
 from dotenv import load_dotenv
 
+# load_dotenv() 只负责把 .env 内容放入 os.environ；后续函数仍通过 os.getenv 读取。
 load_dotenv()
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -25,6 +26,7 @@ def env_str(name: str, default: str = "") -> str:
         str: 读取到的字符串值。
     """
     value = os.getenv(name)
+    # 条件表达式的格式是“真值 if 条件 else 假值”。
     return value if value is not None else default
 
 
@@ -43,6 +45,7 @@ def env_bool(name: str, default: bool = False) -> bool:
     if value is None or value == "":
         return default
 
+    # 先去除首尾空白并统一小写，使 TRUE、 true 等写法得到同一判断结果。
     normalized = value.strip().lower()
     if normalized in _TRUE_VALUES:
         return True
