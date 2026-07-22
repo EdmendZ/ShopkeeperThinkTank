@@ -23,10 +23,10 @@ def node_bge_embedding(state: ImportGraphState) -> ImportGraphState:
     return state
 
 if __name__ == '__main__':
-    # 加载环境变量：定位项目根目录下的.env，读取模型路径/设备等配置
+    # 这里只计算当前文件和项目根目录的位置；当前示例不会在这里调用 load_dotenv。
+    # 若以后需要手动加载 .env，可使用 project_root 拼出 .env 的绝对路径。
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(current_dir))
-    load_dotenv(os.path.join(project_root, ".env"))
 
     # 构造模拟测试状态：模拟上游节点输出的chunks数据，贴合真实业务场景
     test_state = ImportGraphState({

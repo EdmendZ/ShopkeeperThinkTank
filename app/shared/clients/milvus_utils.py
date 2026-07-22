@@ -48,19 +48,22 @@ def create_hybrid_search_requests(dense_vector, sparse_vector, dense_params=None
     :param limit: 单向量搜索返回结果数量，默认5
     :return: 搜索请求列表，包含[dense_req, sparse_req]
     """
-    # 稠密向量默认搜索参数：余弦相似度（COSINE），适配BGE-M3稠密向量并与建库参数保持一致
+    # 默认参数对应主体名称集合的 HNSW + COSINE 索引；ef 越大通常召回越充分，
+    # 但查询更慢。若查询 index_service 创建的切块集合，应显式传入 IP metric，
+    # 因为该集合使用 AUTOINDEX + IP，不能混用两种相似度度量。
     if dense_params is None:
-        dense_params = {"metric_type": "IP"}
+        dense_params = {"metric_type": "COSINE", "params": {"ef": 100}}
     # 稀疏向量默认搜索参数：内积（IP），适配BGE-M3稀疏向量
     if sparse_params is None:
         sparse_params = {"metric_type": "IP"}
 
-    # 构建稠密向量搜索请求，关联Milvus的dense_vector字段 近似最近邻（ANN）检索请求的核心类
+    # AnnSearchRequest 表示“一路 ANN 检索”。data 必须是二维列表，因此把单个向量包成 [dense_vector]。
     dense_req = AnnSearchRequest(
         data=[dense_vector],
         anns_field="dense_vector",
         param=dense_params,
-        expr=expr, # 混合搜索的过滤条件   # 单列搜索 过滤条件 filter =
+        # expr 会同时用于两路召回，先按标量字段过滤，再进行向量检索。
+        expr=expr,
         limit=limit
     )
 

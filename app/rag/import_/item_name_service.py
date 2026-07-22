@@ -204,12 +204,15 @@ def prepare_item_name_collection() -> None:
     # 准备索引参数
     index_params = milvus_client.prepare_index_params()
 
-    # 为稠密向量创建索引：使用 AUTOINDEX，metric_type 为 IP（内积）
+    # 稠密向量采用 HNSW 图索引；COSINE 用于比较文本向量方向。
+    # M=64 控制每个节点保留的邻居数量，efConstruction=100 控制建图时的候选范围；
+    # 数值越大通常召回更好，但索引构建更慢、占用更多内存。
     index_params.add_index(
         field_name="dense_vector",
-        index_type="AUTOINDEX",
+        index_type="HNSW",
         index_name="dense_vector_index",
-        metric_type="IP",
+        metric_type="COSINE",
+        params={"M": 64, "efConstruction": 100},
     )
 
     # 为稀疏向量创建索引：使用 SPARSE_INVERTED_INDEX，算法为 DAAT_MAXSCORE
