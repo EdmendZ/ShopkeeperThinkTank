@@ -17,7 +17,7 @@ def node_item_name_recognition(state: ImportGraphState) -> ImportGraphState:
     add_done_task(state["task_id"], "node_item_name_recognition")
     return state
 
-# ===================== 本地测试方法（直接运行调试，无需启动LangGraph） =====================
+# 本地 smoke test 会连接真实 LLM 与 Milvus，并可能更新主体索引。
 def test_node_item_name_recognition():
     """
     商品名称识别节点本地测试方法

@@ -1,3 +1,5 @@
+"""主体确认 service：结合会话历史改写 query，并映射到 Milvus 中的标准主体名称。"""
+
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -8,17 +10,12 @@ from app.process.query.agent.state import QueryGraphState
 from app.shared.runtime.load_prompt import load_prompt
 from app.shared.runtime.logger import step_log, logger
 
-# ====================== 全局配置 ======================
-# 拉取历史消息最大条数
+# 阈值按 Milvus 归一化 score 解释：高分直接确认，中间区间要求用户选择。
 QUERY_HISTORY_LIMIT = 10
-# 主体名称确认阈值：高于该分数 → 直接确认
 ITEM_NAME_CONFIRM_THRESHOLD = 0.65
-# 主体名称候选阈值：介于两者之间 → 让用户选择
 ITEM_NAME_CANDIDATE_THRESHOLD = 0.50
-# 给用户选择时，最多展示几个候选
 ITEM_NAME_OPTIONS_TOPK = 2
 
-# ====================== 主体确认主入口 ======================
 @step_log("confirm_item_name")
 def confirm_item_name(state: QueryGraphState) -> dict:
     """
@@ -51,7 +48,6 @@ def confirm_item_name(state: QueryGraphState) -> dict:
 
     return state
 
-# ====================== 步骤1：参数校验 ======================
 @step_log("validate_query_identity")
 def validate_query_identity(state: dict) -> tuple[str, str]:
     """
@@ -71,7 +67,6 @@ def validate_query_identity(state: dict) -> tuple[str, str]:
 
     return original_query, session_id
 
-# ====================== 步骤2：加载历史对话 ======================
 @step_log("load_history")
 def load_history(session_id: str) -> list[dict]:
     """
@@ -80,7 +75,6 @@ def load_history(session_id: str) -> list[dict]:
     """
     return history_repository.list_recent(session_id, limit=QUERY_HISTORY_LIMIT)
 
-# ====================== 步骤3：拼接历史对话文本 ======================
 @step_log("build_history_text")
 def build_history_text(history_messages: list[dict]) -> str:
     """
@@ -92,12 +86,11 @@ def build_history_text(history_messages: list[dict]) -> str:
         # 用户消息使用改写后的query，助手消息使用原始text
         content = msg.get("rewritten_query") if msg.get("role") == "user" else msg.get("text")
         # 拼接识别出的产品名称
-        item_names = "、".join(msg.get("item_names", []))
+        item_names = "、".join(msg.get("item_names") or [])
         lines.append(f"角色:{msg.get('role', '')},内容:{content},关联主体: {item_names}")
 
     return "\n".join(lines)
 
-# ====================== 步骤4：大模型改写问题 + 提取主体名称 ======================
 @step_log("rewrite_query_and_extract_item_names")
 def rewrite_query_and_extract_item_names(history_messages: list[dict], original_query: str) -> dict:
     """
@@ -137,7 +130,6 @@ def rewrite_query_and_extract_item_names(history_messages: list[dict], original_
 
     return result
 
-# ====================== 步骤5：向量检索匹配标准主体名 ======================
 @step_log("search_item_name_candidates")
 def search_item_name_candidates(item_names: list[str]) -> dict[str, list[dict]]:
     """
@@ -178,7 +170,6 @@ def search_item_name_candidates(item_names: list[str]) -> dict[str, list[dict]]:
 
     return vector_dict
 
-# ====================== 步骤6：根据分数筛选确认/候选/未找到 ======================
 @step_log("select_item_names")
 def select_item_names(vector_dict: dict[str, list[dict]]) -> dict:
     """
@@ -216,7 +207,6 @@ def select_item_names(vector_dict: dict[str, list[dict]]) -> dict:
         "options_item_name_list": options_item_name_list,
     }
 
-# ====================== 步骤7：将结果写入state ======================
 @step_log("apply_item_name_result")
 def apply_item_name_result(state: dict, final_result: dict, rewritten_query: str) -> None:
     """
@@ -250,7 +240,6 @@ def apply_item_name_result(state: dict, final_result: dict, rewritten_query: str
     state["rewritten_query"] = rewritten_query
     state["item_names"] = []
 
-# ====================== 步骤8：保存用户消息到历史 ======================
 @step_log("save_user_message")
 def save_user_message(state: dict) -> None:
     """

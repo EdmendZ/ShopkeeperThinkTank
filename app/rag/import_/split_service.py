@@ -23,13 +23,13 @@ from app.rag.import_.config import CHUNK_MAX_SIZE, CHUNK_SIZE
 from app.process.import_.agent.state import ImportGraphState
 
 
-# -------------------------- Service 总入口：串联完整切分流程 --------------------------
+# ``step_log`` 记录耗时并重新抛出异常，调用方仍能感知切分失败。
 # @step_log 是项目自定义装饰器：调用函数前后会自动打印开始、结束和耗时日志；
 # 如果函数抛出异常，装饰器会记录异常后继续向上抛出，不会把错误悄悄吞掉。
 @step_log("split_document")
 def split_document(state: dict) -> dict:
     """
-    文档切分的总入口，负责按固定顺序调用各个子函数。
+    文档切分的总入口，按固定顺序执行输入规范化、粗切、长度整理和备份。
 
     state 是 LangGraph 节点之间共同传递的普通字典。本函数主要读取：
     - md_content：图片处理完成后的 Markdown 正文；
@@ -68,7 +68,7 @@ def split_document(state: dict) -> dict:
     return state
 
 
-# -------------------------- 子函数 1：读取正文并补齐标题 --------------------------
+# 输入规范化：优先使用 state cache，必要时回退到磁盘。
 @step_log("load_markdown_content")
 def load_markdown_content(state: dict) -> tuple[str, str]:
     """
@@ -129,7 +129,7 @@ def load_markdown_content(state: dict) -> tuple[str, str]:
     return md_content, file_title
 
 
-# -------------------------- 子函数 2：按 Markdown 标题粗切分 --------------------------
+# 第一阶段按 Markdown heading 保留章节边界。
 @step_log("split_by_titles")
 def split_by_titles(md_content: str, file_title: str) -> list[dict]:
     """
@@ -255,7 +255,7 @@ def split_by_titles(md_content: str, file_title: str) -> list[dict]:
     return chunks
 
 
-# -------------------------- 子函数 3：统一整理 Chunk 长度和字段 --------------------------
+# 第二阶段拆长合短，并规范化下游索引所需字段。
 @step_log("refine_chunks")
 def refine_chunks(
     sections: list[dict],
@@ -485,7 +485,7 @@ def _merge_short_sections(
     return merged_sections
 
 
-# -------------------------- 子函数 4：备份最终 Chunk --------------------------
+# 备份最终 chunks，便于离线检查实际切分结果。
 @step_log("backup_chunks")
 def backup_chunks(chunks: list[dict], md_path: str) -> None:
     """
@@ -502,21 +502,13 @@ def backup_chunks(chunks: list[dict], md_path: str) -> None:
         如果 chunks.json 已存在，write_text 会覆盖旧内容；父目录不存在、没有
         写权限或 chunks 中含有无法序列化的对象时，异常会继续向上抛出。
     """
-    # Path(md_path).parent 取得 Markdown 所在目录。
-    # pathlib 重载了 / 运算符，因此这里的 / 表示拼接路径，不是数学除法。
     chunks_json_path = Path(md_path).parent / "chunks.json"
 
-    # json.dumps 先把 Python 的“列表 + 字典”转换成 JSON 字符串：
-    # - ensure_ascii=False：中文保持原样，不转换成 \u4e2d 形式；
-    # - indent=4：使用 4 个空格缩进，方便初学者直接打开文件阅读。
-    # write_text 再使用 UTF-8 编码把字符串一次性写入磁盘。
+    # ensure_ascii=False 保留中文；indent 让离线审查和 diff 更稳定。
     chunks_json_path.write_text(json.dumps(chunks, ensure_ascii=False, indent=4), encoding="utf-8")
 
-    # 下面是等价的传统写法，仅作为学习对照；因为前面有 #，所以不会执行。
-    # with open(chunks_json_path, "w", encoding="utf-8") as f:
-    # json.dump(chunks, f, ensure_ascii=False, indent=4)
-
 def test_refine_chunks_demo():
+    """构造长短章节并打印 refine 结果，供 project2 本地 smoke test 使用。"""
     sections = [
         {
             "title": "## 功能说明",
@@ -531,4 +523,5 @@ def test_refine_chunks_demo():
     ]
     result = refine_chunks(sections, max_len=1000, min_len=600)
     print(result)
+# 保留 project2 的既有 import-time demo 行为；生产导入时会向 stdout 打印结果。
 test_refine_chunks_demo()

@@ -1,3 +1,5 @@
+"""查询 HTTP API：协调同步响应、后台 LangGraph 执行与 SSE 进度流。"""
+
 from mimetypes import guess_type
 from pathlib import Path
 import sys
@@ -23,14 +25,14 @@ from app.shared.utils.task_utils import (
     update_task_status,
 )
 
-# 定义fastapi对象
+# 该 app 会由根应用挂载，也可直接运行以便独立调试查询服务。
 app = FastAPI(
     title=settings.query_app_name,
     description="描述,进行rag查询的服务对象",
     version="0.2.0"
 )
 
-# 跨域处理
+# 当前前端可能从独立开发端口访问，因此开放 CORS；生产部署应由网关收紧来源。
 app.add_middleware(
     CORSMiddleware,
     allow_origins = ['*'],
@@ -40,13 +42,18 @@ app.add_middleware(
 
 @app.get("/html")
 def query_html():
+    """返回内置聊天页面；media type 根据文件扩展名推断。"""
     html_path = PROJECT_ROOT / "app" / "process" / "query" / "page" / "chat.html"
     return FileResponse(path=html_path, media_type=guess_type(html_path.name)[0])
 
+
 def run_query_graph(query: str, session_id: str, is_stream: bool):
-    # 一会回调用 main_graph执行
-    # 本次任务开启了！ is_stream = True 把结果加入到队列，sse可以取到
-    # 清理上一次任务状态，避免缓存污染
+    """执行一次查询图，并把生命周期状态写入 session task store。
+
+    流式模式下，task status 和异常还会通过 SSE queue 推送；函数本身不返回答案，
+    最终结果由 answer node 写入 task store。
+    """
+    # session_id 可被客户端复用；启动新任务前必须清除同 ID 的旧进度和结果。
     clear_task(session_id)
     update_task_status(session_id, "processing", is_stream)
 
@@ -57,32 +64,27 @@ def run_query_graph(query: str, session_id: str, is_stream: bool):
     )
     try:
         query_app.invoke(state)
-        # 本次任务开启了！ is_stream = True 把结果加入到队列，sse可以取到
         update_task_status(session_id, "completed", is_stream)
     except Exception as e:
         logger.exception(f"---session_id = {session_id},查询流程出现异常！！{str(e)}")
-        # 修改 event = process
         update_task_status(session_id, "failed", is_stream)
-        # 推送指定类型的事件
         push_to_session(session_id, SSEEvent.ERROR, {"error": str(e)})
 
-#  推送接口
-@app.post("/query")  # 客户端 -》 问题 -》 graph开启了 -》 查到rag的结果 -》 返回即可！！
+
+@app.post("/query")
 async def query(request: QueryRequest,background_tasks: BackgroundTasks):
-    """
-    :param request: 请求参数
-    :param background_tasks: 异步执行函数  is_stream = True
-    :return:
+    """提交查询，并根据 ``is_stream`` 选择立即响应或同步等待。
+
+    流式请求先创建 session queue，再通过 FastAPI ``BackgroundTasks`` 执行查询图；
+    客户端使用返回的 ``session_id`` 订阅 ``/stream/{session_id}``。非流式请求在当前
+    调用中完成图执行，并从 task store 读取答案。
     """
     query = request.query
     session_id = request.session_id or str(uuid.uuid4())
     is_stream = request.is_stream
-    # 判断是不是流式处理 （异步 -》 先返回一个结果 开始处理 | 后台运行图，结果向前端推送）
     if is_stream:
-        # 只要开启流式处理，我们业务中就是将数据，插入到队列中！ {session_id , queue [update_task_state , add_running_task,add_done_list]}
-        # 创建当前session_id对应的队列 =》 _session_stream
+        # queue 必须先于 background task 创建，避免图启动后的首个事件无处投递。
         create_sse_queue(session_id)
-        # 异步执行  立即返回结果前端 || 中间的过程 sse 一点一点推送给前端
         background_tasks.add_task(run_query_graph, query, session_id, is_stream)
         logger.info(f"query:{query}已经开启了异步和流式处理！！")
         return AsyncQueryResponse(
@@ -90,11 +92,9 @@ async def query(request: QueryRequest,background_tasks: BackgroundTasks):
             message="本次查询处理中...."
         )
     else:
-        # 同步执行
         run_query_graph(query, session_id, is_stream)
-        # 获取最后一个节点插入的结果！ node_answer_output (answer)
-        answer = get_task_result(session_id,"answer")  # task_utils 封装的一个存储会话结果函数
-        # 返回对应的json数据即可
+        # ``node_answer_output`` 负责把最终 answer 写入 task store。
+        answer = get_task_result(session_id,"answer")
         logger.info(f"query:{query}开启同步处理！处理结果为：{answer}!")
         return QueryResponse(
             answer=answer,
@@ -105,6 +105,7 @@ async def query(request: QueryRequest,background_tasks: BackgroundTasks):
 
 @app.get("/stream/{session_id}")
 async def stream_query_result(session_id: str, request: Request):
+    """以 ``text/event-stream`` 持续输出指定 session 的进度和结果事件。"""
     return StreamingResponse(
         sse_generator(session_id, request),
         media_type="text/event-stream",
@@ -115,13 +116,13 @@ async def stream_query_result(session_id: str, request: Request):
         },
     )
 
-# 健康检查
 @app.get("/health")
 async def health():
-    """服务健康检查"""
+    """返回轻量健康状态，不探测模型或外部存储连接。"""
     logger.info("健康检查接口调用成功")
     return {"ok": True}
 
 if __name__ == "__main__":
     import uvicorn
+    # 直接执行本模块时启动独立查询服务；被根应用导入时不会创建第二个 server。
     uvicorn.run(app, host=settings.app_host, port=settings.query_app_port)

@@ -1,3 +1,5 @@
+"""HyDE retrieval service：用 hypothetical answer 扩展 query 后复用本地检索。"""
+
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -24,7 +26,6 @@ def search_embedding_hyde(state: dict) -> list[dict]:
     chunks = search_chunks_with_hyde(rewritten_query=rewritten_query, item_names=item_names)
     return chunks
 
-# 子函数1 检索前置条件校验
 @step_log("validate_retrieval_state")
 def validate_retrieval_state(state: dict) -> tuple[list[str], str]:
     """
@@ -43,7 +44,6 @@ def validate_retrieval_state(state: dict) -> tuple[list[str], str]:
         raise ValueError("item_names或rewritten_query不存在,无法继续业务!")
     return item_names, rewritten_query
 
-# 子函数2 复用普通向量检索链路
 @step_log("search_chunks_with_hyde")
 def search_chunks_with_hyde(
     *,
@@ -59,7 +59,7 @@ def search_chunks_with_hyde(
         item_names: 已确认的业务主体列表，用于检索范围过滤
         limit: 检索返回知识片段最大数量
     Returns:
-        tuple: 模型生成的假设答案、HYDE增强检索后的知识片段列表
+        基于增强 query 检索到的标准化知识片段列表；hypothetical answer 不向下游暴露。
     """
     # 大模型基于用户问题生成假设性标准答案，扩充弱语义信息
     hyde_answer = generate_hyde_answer(rewritten_query)
@@ -69,7 +69,6 @@ def search_chunks_with_hyde(
     chunks = search_chunks(rewritten_query=hybrid_query, item_names=item_names, limit=limit)
     return chunks
 
-# 子函数3 生成HyDE假设答案
 @step_log("generate_hyde_answer")
 def generate_hyde_answer(rewritten_query: str) -> str:
     """

@@ -1,3 +1,5 @@
+"""通过百炼 MCP web search 补充外部检索结果。"""
+
 from agents.mcp import MCPServerStreamableHttp
 
 from app.shared.config import mcp_config
@@ -5,7 +7,7 @@ from app.shared.runtime.logger import logger, step_log
 import asyncio
 import json
 
-# 从全局配置读取MCP联网搜索服务地址、密钥
+# 模块加载时读取配置，后续每次调用创建并释放独立 MCP connection。
 DASHSCOPE_BASE_URL_STREAM_ABLE_HTTP = mcp_config.mcp_base_url
 DASHSCOPE_API_KEY = mcp_config.api_key
 
@@ -30,7 +32,6 @@ def search_by_web(state: dict, count: int = 10) -> list[dict]:
     # 提取网页详情列表返回，无结果则返回空列表
     return text_dict.get("pages", [])
 
-# 子函数1 输入校验
 @step_log("validate_web_search_inputs")
 def validate_web_search_inputs(state: dict) -> str:
     """
@@ -48,7 +49,6 @@ def validate_web_search_inputs(state: dict) -> str:
         raise ValueError("rewritten_query不能为空!")
     return rewritten_query
 
-# 子函数2 异步联网搜索执行
 @step_log("validate_web_search_inputs")
 async def search_web_documents_async(rewritten_query: str, count: int = 5):
     """
@@ -71,12 +71,10 @@ async def search_web_documents_async(rewritten_query: str, count: int = 5):
         },
     )
     try:
-        # 建立MCP服务连接
         await mcp_server.connect()
-        # 打印当前可用工具列表，用于调试观测
+        # 工具列表仅用于运行期可观测性，不参与 tool routing。
         tool_list = await mcp_server.list_tools()
         logger.info(f"工具列表:{tool_list}")
-        # 调用百炼联网搜索工具，传入检索问句与结果数量
         return await mcp_server.call_tool(
             tool_name="bailian_web_search",
             arguments={
@@ -85,5 +83,5 @@ async def search_web_documents_async(rewritten_query: str, count: int = 5):
             },
         )
     finally:
-        # 无论成功失败，最终释放连接资源，避免连接堆积
+        # MCP client 持有网络资源，异常路径也必须 cleanup。
         await mcp_server.cleanup()

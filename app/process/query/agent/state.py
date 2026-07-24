@@ -1,13 +1,11 @@
+"""查询 LangGraph 的共享 state schema 与安全复制 helpers。"""
+
 from typing_extensions import TypedDict
 from typing import List
 import copy
 
 class QueryGraphState(TypedDict):
-    """
-    QueryGraphState 定义了整个查询流程中流转的数据结构。
-    TypedDict 让我们在代码中能有自动补全和类型检查。
-    使用字典式访问（如 state["session_id"]、state.get("answer")）。
-    """
+    """查询工作流跨节点传递的数据结构；运行时仍使用普通 ``dict``。"""
     session_id: str  # 会话唯一标识
     original_query: str  # 用户原始问题
 
@@ -32,9 +30,7 @@ class QueryGraphState(TypedDict):
     image_urls: List[str]  # 答案中引用的图片链接
 
 
-# ========================
-# 默认状态（全部为空）
-# ========================
+# 可变字段只作为复制模板使用，调用方不得直接复用该对象。
 query_graph_default_state: QueryGraphState = {
     "session_id": "",
     "original_query": "",
@@ -53,42 +49,27 @@ query_graph_default_state: QueryGraphState = {
 }
 
 
-# ========================
-# 创建默认状态（可覆盖）
-# ========================
 def create_query_default_state(**overrides) -> QueryGraphState:
-    """
-    创建查询流程的默认状态，支持覆盖字段
-    """
+    """创建隔离的默认 state，并应用调用方提供的字段覆盖。"""
     state = copy.deepcopy(query_graph_default_state)
     state.update(overrides)
     return state
 
 
-# ========================
-# 获取干净状态
-# ========================
 def get_query_default_state() -> QueryGraphState:
-    """
-    返回一个新的状态实例，避免全局变量污染。
-    """
+    """返回默认 state 的 deep copy，避免 list 字段在会话之间共享。"""
     return copy.deepcopy(query_graph_default_state)
 
 
-# ========================
-# 状态复制函数
-# ========================
 def copy_query_state(state: QueryGraphState, **overrides) -> QueryGraphState:
-    """
-    复制现有状态并可覆盖字段，深拷贝，不污染原数据
-    """
+    """深复制现有 state 后应用覆盖，不修改输入对象及其嵌套字段。"""
     new_state = copy.deepcopy(state)
     new_state.update(overrides)
     return new_state
 
 
 if __name__ == "__main__":
-    # 测试
+    # 直接执行时演示 state isolation；模块导入不产生输出。
     state = create_query_default_state(
         session_id="test_001",
         original_query="华为P60怎么样?",
@@ -96,7 +77,6 @@ if __name__ == "__main__":
     )
     print("初始化状态：", state)
 
-    # 复制状态
     new_state = copy_query_state(
         state,
         original_query="修改后的问题"

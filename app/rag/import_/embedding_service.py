@@ -1,4 +1,4 @@
-"""导入流程的向量化服务占位模块，预留为切块补充稠密、稀疏向量的接口。"""
+"""导入向量化 service：分批生成 dense/sparse vectors 并回写文档 chunks。"""
 from app.shared.runtime.logger import logger, step_log
 from app.infra.llm import llm_provider
 from app.rag.import_.config import EMBEDDING_BATCH_SIZE
@@ -15,7 +15,6 @@ def generate_chunk_embeddings(state: dict) -> dict:
     state["chunks"] = embed_chunks(require_chunks(state))
     return state
 
-# 子函数1 校验输入
 @step_log("require_chunks")
 def require_chunks(state: dict) -> list[dict]:
     """
@@ -27,8 +26,7 @@ def require_chunks(state: dict) -> list[dict]:
     # 从 state 中获取核心数据
     chunks = state.get("chunks", [])
 
-    # ===================== 校验 chunks =====================
-    # 如果 chunks 为空，无法继续业务，直接抛出异常终止流程
+    # 空输入没有可入库内容，直接终止导入，避免下游创建空集合记录。
     if not chunks:
         logger.error("chunks为空,无法继续业务处理!")
         raise ValueError("chunks为空,无法继续业务处理!")
@@ -36,7 +34,6 @@ def require_chunks(state: dict) -> list[dict]:
     # 返回校验后的数据
     return chunks
 
-# 子函数2 切片生成稠密和稀疏向量
 @step_log("embed_chunks")
 def embed_chunks(chunks: list[dict], *, step: int = EMBEDDING_BATCH_SIZE) -> list[dict]:
     """
@@ -46,22 +43,15 @@ def embed_chunks(chunks: list[dict], *, step: int = EMBEDDING_BATCH_SIZE) -> lis
     :param step: 批次大小，默认由配置 EMBEDDING_BATCH_SIZE 控制
     :return: 带向量字段的切片列表
     """
-    # 初始化结果列表，存储带有向量的 chunk 数据
     chunks_vector: list[dict] = []
-
-    # 获取总切片数
     total = len(chunks)
 
-    # ===================== 分批处理 =====================
-    # 按批次大小循环处理，每次处理 step 条切片
+    # 分批限制单次 Embedding 请求的显存和 API payload。
     for index in range(0, total, step):
         try:
-            # 截取当前批次的切片，最后一批自动适配剩余数量
             step_chunks = chunks[index:index + step]
 
-            # ===================== 构造模型输入文本 =====================
-            # 拼接格式："主体:{item_name},内容:{content}"
-            # 核心词前置原则：Embedding 模型对前 128 个 token 的注意力最集中
+            # 主体名作为显式前缀，为 query 阶段的主体过滤保留一致语义。
             vector_str_list = []
             for item in step_chunks:
                 item_name = item.get("item_name")
@@ -69,13 +59,10 @@ def embed_chunks(chunks: list[dict], *, step: int = EMBEDDING_BATCH_SIZE) -> lis
                 # 有主体名称则拼接，无则直接使用内容
                 vector_str_list.append(f"主体:{item_name},内容:{content}" if item_name else content)
 
-            # ===================== 调用 Embedding 模型 =====================
-            # 调用 llm_provider.embed_documents() 生成批量向量
-            # 返回格式：{"dense": [稠密向量列表], "sparse": [稀疏向量列表]}
+            # Provider 返回与输入顺序一致的 dense/sparse vector arrays。
             result = llm_provider.embed_documents(vector_str_list)
 
-            # ===================== 绑定向量字段 =====================
-            # 为当前批次每个切片绑定对应向量，复制原数据避免修改上游源数据
+            # 复制 chunk，避免把向量字段写入上游仍可能复用的对象。
             for i, chunk in enumerate(step_chunks):
                 chunk_new = chunk.copy()
                 chunk_new["dense_vector"] = result["dense"][i]  # 绑定稠密向量
@@ -83,7 +70,7 @@ def embed_chunks(chunks: list[dict], *, step: int = EMBEDDING_BATCH_SIZE) -> lis
                 chunks_vector.append(chunk_new)
 
         except Exception as exc:
-            # ===================== 异常处理 =====================
+            # 单批失败时保留其他批次结果；warning 包含区间便于后续补偿。
             # 捕获异常，记录警告信息并跳过当前批次
             logger.warning(f"index={index}步骤,发生错误,跳过,继续生成向量!!,错误信息:{str(exc)}")
             # 跳过当前批次，继续处理下一批次，保证整体流程不中断

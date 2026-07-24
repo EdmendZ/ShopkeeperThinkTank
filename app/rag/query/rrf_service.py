@@ -1,10 +1,10 @@
+"""Reciprocal Rank Fusion service，按排名融合 Embedding 与 HyDE 结果。"""
+
 from app.process.query.agent.state import QueryGraphState
 from app.shared.runtime.logger import step_log, logger
 
-# RRF 融合默认配置
-# 最终返回的融合结果数量
+# 默认值同时保留为模块配置，函数参数允许测试或调用方覆盖。
 top = 5
-# RRF 公式平滑系数，避免排名过低导致分数趋近于 0
 k = 60
 
 
@@ -27,7 +27,6 @@ def fuse_by_rrf(state: QueryGraphState) -> list[dict]:
     # 3. 执行 RRF 融合并返回最终结果
     return reciprocal_rank_fusion(param_list)
 
-# 子函数1 输入读取
 @step_log("validate_rrf_inputs")
 def validate_rrf_inputs(state: dict) -> tuple[list[dict], list[dict]]:
     """
@@ -45,7 +44,6 @@ def validate_rrf_inputs(state: dict) -> tuple[list[dict], list[dict]]:
 
     return embedding_chunks, hyde_chunks
 
-# 子函数2 RRF核心算法
 @step_log("reciprocal_rank_fusion")
 def reciprocal_rank_fusion(
         param_list: list[tuple[list[dict], float]],

@@ -52,8 +52,7 @@ def require_chunks(state: dict) -> list[dict]:
     # 从 state 中获取核心数据；这里不校验每个 Chunk 的字段完整性。
     chunks = state.get("chunks", [])
 
-    # ===================== 校验 chunks =====================
-    # 如果 chunks 为空，无法继续业务，直接抛出异常终止流程
+    # 空列表不得触发 collection 创建或同主体旧数据删除。
     if not chunks:
         logger.error("chunks为空,无法继续业务!!")
         raise ValueError("chunks为空,无法继续业务!!")
@@ -79,7 +78,7 @@ def prepare_chunks_collection() -> None:
     if milvus_client.has_collection(collection_name=collection_name):
         return
 
-    # ===================== 创建 Schema =====================
+    # Schema 只在 collection 首次创建时生效，后续字段变更需要显式迁移。
     # auto_id=True 让 Milvus 生成主键；enable_dynamic_field=True 允许写入未声明的额外字段。
     schema = milvus_client.create_schema(auto_id=True, enable_dynamic_field=True)
 
@@ -110,7 +109,7 @@ def prepare_chunks_collection() -> None:
     # 添加稀疏向量字段：SPARSE_FLOAT_VECTOR 类型
     schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)
 
-    # ===================== 创建索引 =====================
+    # dense 与 sparse 字段使用各自的检索 metric 和 index type。
     # 准备索引参数
     index_params = milvus_client.prepare_index_params()
 

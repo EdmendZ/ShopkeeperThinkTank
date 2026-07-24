@@ -1,3 +1,5 @@
+"""LangGraph web search node：通过 MCP 补充外部文档。"""
+
 import sys
 
 from app.shared.runtime.logger import node_log
@@ -6,9 +8,7 @@ from app.shared.utils.task_utils import add_done_task, add_running_task
 
 @node_log("node_web_search_mcp")
 def node_web_search_mcp(state):
-    """
-    节点功能：调用外部搜索引擎补充信息
-    """
+    """执行外网检索，产出 ``web_search_docs`` partial state。"""
     add_running_task(state["session_id"], sys._getframe().f_code.co_name, state["is_stream"])
     pages = search_by_web(state)
     add_done_task(state["session_id"], sys._getframe().f_code.co_name, state["is_stream"])

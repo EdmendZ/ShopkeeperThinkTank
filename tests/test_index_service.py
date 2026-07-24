@@ -1,3 +1,5 @@
+"""Milvus chunk collection schema/index configuration regression tests。"""
+
 import sys
 import unittest
 from pathlib import Path
@@ -9,15 +11,21 @@ from app.rag.import_ import index_service
 
 
 class RecordingIndexParams:
+    """记录 ``add_index`` 调用参数的 minimal fake。"""
+
     def __init__(self) -> None:
         self.entries: list[dict] = []
 
     def add_index(self, **kwargs) -> None:
+        """按调用顺序保存 index definition，供断言检索。"""
         self.entries.append(kwargs)
 
 
 class PrepareChunksCollectionIndexTests(unittest.TestCase):
+    """验证首次建 collection 时生成的 dense/sparse index contract。"""
+
     def test_dense_and_sparse_indexes_match_project3_build_intent(self) -> None:
+        """防止 COSINE/HNSW 与 sparse IP index 配置在同步时发生漂移。"""
         fake_client = MagicMock()
         fake_client.has_collection.return_value = False
         fake_schema = MagicMock()

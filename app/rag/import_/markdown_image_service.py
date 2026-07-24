@@ -161,7 +161,7 @@ def upload_images_and_replace(
     # 获取MinIO客户端实例
     minio_client = minio_gateway.client()
 
-    # ===================== 1. 清空该文档在MinIO中的旧图片 =====================
+    # 以文档 stem 作为 object prefix；先清理旧对象，避免重复导入留下孤儿图片。
     # 列出当前文档(stem)在MinIO中已存在的所有图片
     object_list = minio_client.list_objects(
         bucket_name=minio_gateway.bucket_name,
@@ -179,7 +179,7 @@ def upload_images_and_replace(
     for error in errors:
         logger.warning(f"删除失败,失败原因:{error}")
 
-    # ===================== 2. 上传所有新图片到 MinIO =====================
+    # 上传成功后记录 URL，后续只替换实际出现在 Markdown 中的引用。
     # 存储：图片文件名 → 在线访问URL
     image_url_dict: dict[str, str] = {}
     for image_name, image_path_str, _ in image_context_list:
@@ -202,7 +202,7 @@ def upload_images_and_replace(
         logger.warning("图片上传全部失败!")
         return md_content
 
-    # ===================== 3. 替换 MD 中的图片引用 =====================
+    # replacement 同时加入视觉摘要，令纯文本检索也能利用图片语义。
     # 遍历所有已上传成功的图片
     for image_name, image_url in image_url_dict.items():
         # 拿到当前图片的AI摘要

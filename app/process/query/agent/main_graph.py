@@ -1,3 +1,5 @@
+"""构建查询 LangGraph：主体确认后并行检索，再执行融合、重排与答案生成。"""
+
 from langgraph.graph import StateGraph, END
 
 from app.process.query.agent.nodes.node_answer_output import node_answer_output
@@ -10,10 +12,9 @@ from app.process.query.agent.nodes.node_web_search_mcp import node_web_search_mc
 from app.process.query.agent.state import QueryGraphState
 from app.shared.runtime.logger import logger
 
-# 1. 定义状态图对象，并且指定全局的 state
+# StateGraph 以 QueryGraphState 作为跨节点 data contract。
 query_graph = StateGraph(QueryGraphState)
 
-# 2. 添加节点信息
 query_graph.add_node("node_item_name_confirm", node_item_name_confirm)
 query_graph.add_node("node_search_embedding", node_search_embedding)
 query_graph.add_node("node_search_embedding_hyde", node_search_embedding_hyde)
@@ -22,21 +23,18 @@ query_graph.add_node("node_rrf", node_rrf)
 query_graph.add_node("node_rerank", node_rerank)
 query_graph.add_node("node_answer_output", node_answer_output)
 
-# 3. 指定入口节点（有条件边）
 query_graph.set_entry_point("node_item_name_confirm")
 
-# 4. 指定条件边，动态边
-# state answer 进行判定!
-# None -> 第一个节点已经顺利的识别出了 item_names，提问没有问题
-# str  -> 提问是空 | 有不确定的 item_names | 没有识别对应的 item_name
+
 def node_item_name_confirm_after_router(state: QueryGraphState):
-    # 如果前置节点已经生成了澄清或兜底答案，就直接跳转到输出节点收口。
+    """根据主体确认结果选择短路回答或三路并行检索。
+
+    ``answer`` 非空表示上游已经生成澄清/兜底文本，无需继续检索；否则同时启动普通
+    Embedding、HyDE 和 web search 分支。
+    """
     if state['answer']:
-        # 不为空!
-        # str  -> 提问是空 | 有不确定的item_names  | 没有识别对应的item_name
         logger.warning(f"node_item_name_confirm_无法继续向后执行: {state['answer']}")
         return "node_answer_output"
-    # 为空，可以正常执行，并发执行多路检索节点
     return "node_search_embedding", "node_search_embedding_hyde", "node_web_search_mcp"
 
 query_graph.add_conditional_edges(
@@ -50,7 +48,7 @@ query_graph.add_conditional_edges(
     }
 )
 
-# 5. 指定静态边
+# 两路本地检索先做 RRF；web documents 在 rerank service 中与本地结果合并。
 query_graph.add_edge("node_search_embedding", "node_rrf")
 query_graph.add_edge("node_search_embedding_hyde", "node_rrf")
 query_graph.add_edge("node_web_search_mcp", "node_rrf")
@@ -58,5 +56,5 @@ query_graph.add_edge("node_rrf", "node_rerank")
 query_graph.add_edge("node_rerank", "node_answer_output")
 query_graph.add_edge("node_answer_output", END)
 
-# 6. 编译对象即可
+# 模块导入时编译 graph，HTTP 层复用同一 runnable。
 query_app = query_graph.compile()

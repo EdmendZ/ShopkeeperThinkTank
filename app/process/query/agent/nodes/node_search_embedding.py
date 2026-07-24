@@ -1,3 +1,5 @@
+"""LangGraph 本地 Embedding 检索 node。"""
+
 import sys
 
 from app.shared.runtime.logger import node_log
@@ -6,9 +8,7 @@ from app.shared.utils.task_utils import add_done_task, add_running_task
 
 @node_log("node_search_embedding")
 def node_search_embedding(state):
-    """
-    节点功能：进行向量内容检索
-    """
+    """执行主体过滤的混合向量检索，产出 ``embedding_chunks`` partial state。"""
     add_running_task(state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream"))
     chunks = search_by_embedding(state)
     add_done_task(state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream"))

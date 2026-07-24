@@ -1,3 +1,5 @@
+"""答案生成 service：处理短路答案、Prompt、streaming、图片引用与历史落库。"""
+
 import re
 
 from app.infra.llm.providers import llm_provider
@@ -37,7 +39,6 @@ def generate_answer(state: dict) -> dict:
     save_assistant_message(state)
     return state
 
-# 子函数1 已有答案优先返回
 @step_log("try_return_existing_answer")
 def try_return_existing_answer(state: dict) -> bool:
     """
@@ -62,12 +63,11 @@ def try_return_existing_answer(state: dict) -> bool:
     set_task_result(session_id, "answer", answer)
     return True
 
-# 子函数2 答案生成入参校验
 @step_log("validate_generation_inputs")
 def validate_generation_inputs(state: dict) -> tuple[list[dict], list[str], str, list[dict]]:
     """
     答案生成前的必填参数校验
-    必须包含：reranked_docs（参考资料）、query（用户问题）
+    必须包含：reranked_docs（参考资料）以及 rewritten_query 或 original_query
     """
     history = state.get("history", [])
     reranked_docs = state.get("reranked_docs")
@@ -80,7 +80,6 @@ def validate_generation_inputs(state: dict) -> tuple[list[dict], list[str], str,
 
     return reranked_docs, item_names, rewritten_query, history
 
-# 子函数3 Prompt组装
 @step_log("build_answer_prompt")
 def build_answer_prompt(
     reranked_docs: list[dict],
@@ -115,7 +114,6 @@ def build_answer_prompt(
         question=rewritten_query,
     )
 
-# 子函数4 答案生成
 @step_log("final_answer")
 def final_answer(state: dict, prompt: str) -> str:
     """
@@ -144,7 +142,6 @@ def final_answer(state: dict, prompt: str) -> str:
     state["answer"] = final_result
     return final_result
 
-# 子函数5.1 图片提取
 @step_log("extract_image_urls")
 def extract_image_urls(reranked_docs: list[dict]) -> list[str]:
     """
@@ -173,7 +170,6 @@ def extract_image_urls(reranked_docs: list[dict]) -> list[str]:
 
     return image_urls
 
-# 子函数 5.2 历史落库
 @step_log("save_assistant_message")
 def save_assistant_message(state: dict) -> None:
     """

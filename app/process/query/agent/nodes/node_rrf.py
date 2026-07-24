@@ -1,3 +1,5 @@
+"""LangGraph RRF node：融合两路本地检索排名并返回 partial state。"""
+
 import sys
 
 from app.shared.runtime.logger import node_log
@@ -6,11 +8,11 @@ from app.shared.utils.task_utils import add_done_task, add_running_task
 
 @node_log("node_rrf")
 def node_rrf(state):
-    """
-    节点功能：Reciprocal Rank Fusion
-    将多路召回的结果（向量、HyDE、Web）进行加权融合排序。
+    """融合 Embedding 与 HyDE 排名，产出 ``rrf_chunks`` partial state。
+
+    Web documents 不参与此处 RRF，而是在后续 rerank service 中合并。
     """
     add_running_task(state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream"))
-    state = fuse_by_rrf(state)
+    chunks = fuse_by_rrf(state)
     add_done_task(state['session_id'], sys._getframe().f_code.co_name, state.get("is_stream"))
-    return state
+    return {"rrf_chunks": chunks}

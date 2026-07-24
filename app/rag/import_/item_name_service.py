@@ -1,3 +1,5 @@
+"""导入主体识别 service：从 chunks 识别标准名称，并维护 Milvus 主体索引。"""
+
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from pymilvus import DataType
@@ -43,7 +45,6 @@ def recognize_and_index_item_name(state: dict) -> dict:
 
     return state
 
-# 子函数1 校验输入
 @step_log("validate_chunks_and_title")
 def validate_chunks_and_title(state: dict) -> tuple[list[dict], str]:
     """
@@ -56,14 +57,12 @@ def validate_chunks_and_title(state: dict) -> tuple[list[dict], str]:
     chunks = state.get("chunks", [])
     file_title = state.get("file_title")
 
-    # ===================== 校验 chunks =====================
-    # 如果 chunks 为空，无法继续业务，直接抛出异常终止流程
+    # 主体识别需要正文上下文；空 chunks 直接终止导入。
     if not chunks:
         logger.error("chunks没有内容,无法继续业务!")
         raise ValueError("chunks没有内容,无法继续业务!")
 
-    # ===================== 处理 file_title 缺失场景 =====================
-    # 如果标题为空，使用默认值兜底，避免后续流程出错
+    # 缺少标题时保留稳定 fallback，确保 Prompt 和 Milvus record 都有来源标识。
     if not file_title:
         logger.warning("file_title为空给与默认值处理!")
         file_title = "default_title"
@@ -72,7 +71,6 @@ def validate_chunks_and_title(state: dict) -> tuple[list[dict], str]:
     # 返回校验后的数据
     return chunks, file_title
 
-# 子函数2 构建上下文
 @step_log("build_document_context")
 def build_document_context(chunks: list[dict]) -> str:
     """
@@ -97,7 +95,6 @@ def build_document_context(chunks: list[dict]) -> str:
     # 截断到最大字符数限制（由配置 ITEM_NAME_CONTEXT_TOTAL_MAX_CHARS 控制）
     return chunk_str[:ITEM_NAME_CONTEXT_TOTAL_MAX_CHARS]
 
-# 子函数3 调用LLM识别
 @step_log("recognize_item_name")
 def recognize_item_name(context: str, file_title: str) -> str:
     """
@@ -128,7 +125,6 @@ def recognize_item_name(context: str, file_title: str) -> str:
     # 兜底处理：如果识别结果为空，使用 file_title
     return item_name or file_title
 
-# 子函数4 回填数据
 @step_log("apply_item_name")
 def apply_item_name(chunks: list[dict], item_name: str) -> list[dict]:
     """
@@ -145,7 +141,6 @@ def apply_item_name(chunks: list[dict], item_name: str) -> list[dict]:
     # 返回更新后的切片列表
     return chunks
 
-# 子函数5 生成向量
 @step_log("embed_item_name")
 def embed_item_name(item_name: str) -> tuple[list[float], dict[int, float]]:
     """
@@ -163,7 +158,6 @@ def embed_item_name(item_name: str) -> tuple[list[float], dict[int, float]]:
     # sparse: dict[int, float] - {特征索引: 权重} 的字典
     return result["dense"][0], result["sparse"][0]
 
-# 子函数6 准备集合并入库
 @step_log("prepare_item_name_collection")
 def prepare_item_name_collection() -> None:
     """
@@ -181,7 +175,7 @@ def prepare_item_name_collection() -> None:
     if milvus_client.has_collection(collection_name=collection_name):
         return
 
-    # ===================== 创建 Schema =====================
+    # 仅首次创建 schema；已存在 collection 不会自动迁移字段定义。
     # 创建 schema，启用自动 ID 和动态字段
     schema = milvus_client.create_schema(auto_id=True, enable_dynamic_field=True)
 
@@ -200,7 +194,7 @@ def prepare_item_name_collection() -> None:
     # 添加稀疏向量字段：SPARSE_FLOAT_VECTOR 类型
     schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)
 
-    # ===================== 创建索引 =====================
+    # 主体检索同时保留 dense 语义召回与 sparse 关键词召回。
     # 准备索引参数
     index_params = milvus_client.prepare_index_params()
 
@@ -227,7 +221,6 @@ def prepare_item_name_collection() -> None:
     # 创建集合并应用索引
     milvus_client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
 
-# 子函数7 upsert_item_name
 @step_log("upsert_item_name")
 def upsert_item_name(item_name: str, file_title: str, dense_vector: list[float],
                      sparse_vector: dict[int, float]) -> None:
@@ -249,14 +242,13 @@ def upsert_item_name(item_name: str, file_title: str, dense_vector: list[float],
     # 对 item_name 进行转义处理，防止特殊字符导致注入攻击
     safe_item_name = escape_milvus_string(item_name)
 
-    # ===================== 删除已有记录 =====================
-    # 先删除已存在的相同 item_name 记录，保证幂等性
+    # 先删同名记录再插入，使重复导入在业务语义上保持幂等。
     milvus_client.delete(
         collection_name=milvus_gateway.item_name_collection,
         filter=f"item_name == '{safe_item_name}'",
     )
 
-    # ===================== 插入新记录 =====================
+    # 新 record 与 chunks collection 共享同一主体名称，供查询阶段先确认再过滤。
     # 插入包含完整信息的新记录
     milvus_client.insert(
         collection_name=milvus_gateway.item_name_collection,

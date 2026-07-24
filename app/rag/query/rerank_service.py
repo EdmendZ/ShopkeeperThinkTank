@@ -1,3 +1,5 @@
+"""候选重排 service：合并本地与 web 文档，经 Cross-Encoder 打分后动态截断。"""
+
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -6,13 +8,13 @@ from app.process.query.agent.state import QueryGraphState
 from app.shared.runtime.load_prompt import load_prompt
 from app.shared.runtime.logger import step_log, logger
 
-# ====================== 重排全局配置 ======================
+# 这些阈值共同约束 reranker 输入和 score gap 截断策略。
 RERANK_MAX_TOPK: int = 10                # 动态截断最多保留10条结果
 RERANK_MIN_TOPK: int = 1                 # 动态截断最少保留1条结果
 RERANK_GAP_RATIO: float = 2              # 分数断崖比例阈值（用于动态截断）
 RERANK_GAP_ABS: float = 2                # 分数断崖绝对值阈值
 RERANK_MAX_INPUT_TOKENS: int = 512       # 重排模型最大输入token长度
-RERANK_SUMMARY_CHAR_RATIO: float = 1.3   # 中文token与字符换算比例 1token≈1.3字符
+RERANK_SUMMARY_CHAR_RATIO: float = 1.3   # token budget 到字符数的经验换算系数
 RERANK_MIN_SUMMARY_CHARS: int = 50       # 文本精简后最小字符数
 
 
@@ -32,7 +34,6 @@ def rerank_documents(state: QueryGraphState) -> list[dict]:
     # 4. 动态截断，返回最优结果
     return dynamic_topk(sorted_docs)
 
-# 子函数1 读取两路输入
 @step_log("validate_rerank_inputs")
 def validate_rerank_inputs(state: dict) -> tuple[list[dict], list[dict]]:
     """
@@ -49,7 +50,6 @@ def validate_rerank_inputs(state: dict) -> tuple[list[dict], list[dict]]:
 
     return rrf_chunks, web_search_docs
 
-# 子函数2 统一候选结构
 @step_log("merge_rrf_and_web")
 def merge_rrf_and_web(rrf_chunks: list[dict], web_search_docs: list[dict]) -> list[dict]:
     """
@@ -80,7 +80,6 @@ def merge_rrf_and_web(rrf_chunks: list[dict], web_search_docs: list[dict]) -> li
 
     return final_chunk_list
 
-# 子函数3 构造重排问答对
 @step_log("build_question_pairs")
 @step_log("build_question_pairs")
 def build_question_pairs(question: str, final_chunk_list: list[dict], reranker) -> list[list[str]]:
@@ -115,7 +114,6 @@ def build_question_pairs(question: str, final_chunk_list: list[dict], reranker) 
         question_pairs.append([question, answer_for_rerank])
     return question_pairs
 
-# 子函数4 超长文本精炼
 @step_log("summarize_long_rerank_text")
 def summarize_long_rerank_text(question: str, answer: str, limit: int) -> str:
     """
@@ -136,7 +134,6 @@ def summarize_long_rerank_text(question: str, answer: str, limit: int) -> str:
     refined_answer = (llm_provider.chat() | StrOutputParser()).invoke(messages)
     return refined_answer
 
-# 子函数5 重排打分与排序
 @step_log("score_and_sort_chunks")
 def score_and_sort_chunks(state: dict, final_chunk_list: list[dict]) -> list[dict]:
     """
@@ -162,7 +159,6 @@ def score_and_sort_chunks(state: dict, final_chunk_list: list[dict]) -> list[dic
     final_chunk_list.sort(key=lambda x: x.get("score", 0.0), reverse=True)
     return final_chunk_list
 
-# 子函数6 动态TopK
 @step_log("dynamic_topk")
 def dynamic_topk(chunk_list_score_sorted: list[dict]) -> list[dict]:
     """

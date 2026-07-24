@@ -17,7 +17,6 @@ from app.rag.import_.config import (
     MINERU_POLL_TIMEOUT_SECONDS,
 )
 
-# pdf service 总入口 串联三个子函数
 @step_log("parse_pdf_to_markdown")
 def parse_pdf_to_markdown(state: ImportGraphState) -> ImportGraphState:
     """
@@ -38,7 +37,6 @@ def parse_pdf_to_markdown(state: ImportGraphState) -> ImportGraphState:
     state["md_content"] = md_path_obj.read_text(encoding="utf-8")
     return state
 
-# 子函数1 路径检验
 @step_log("validate_pdf_paths")
 def validate_pdf_paths(state:dict) -> tuple[Path, Path]:
     """
@@ -79,7 +77,6 @@ def validate_pdf_paths(state:dict) -> tuple[Path, Path]:
     # 返回路径对象供后续业务使用
     return pdf_path_obj, local_dir_obj
 
-# 子函数2 上传与轮询
 @step_log("upload_pdf_and_poll")
 def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
     """
@@ -208,7 +205,6 @@ def upload_pdf_and_poll(pdf_path_obj: Path) -> str:
         logger.warning(f"解析正在进行中,状态:{extract_result_state}!")
         time.sleep(interval_time)
 
-# 子函数3 下载与解压
 @step_log("download_and_extract_markdown")
 def download_and_extract_markdown(zip_url: str, local_dir_path_obj: Path, stem: str) -> Path:
     """

@@ -1,11 +1,11 @@
+"""主体过滤的 dense/sparse hybrid retrieval service。"""
+
 from app.infra.llm.providers import llm_provider
 from app.infra.vectorstore.milvus_gateway import milvus_gateway
 from app.process.query.agent.state import QueryGraphState
 from app.shared.runtime.logger import step_log, logger
-# ====================== 检索配置 ======================
-# 默认返回的最大知识库片段数量
+# 默认返回数量和 hybrid ranker 权重必须与 Milvus gateway 的请求顺序一致。
 RETRIEVAL_DEFAULT_LIMIT = 5
-# 混合检索权重：dense向量权重 0.9，sparse向量权重 0.1
 RETRIEVAL_RANKER_WEIGHTS = (0.9, 0.1)
 
 @step_log("search_embedding")
@@ -24,7 +24,6 @@ def search_by_embedding(state: QueryGraphState) -> list[dict]:
         item_names=item_names
     )
 
-# 子函数1 前置条件检验
 @step_log("validate_retrieval_state")
 def validate_retrieval_state(state: dict) -> tuple[list[str], str]:
     """
@@ -41,7 +40,6 @@ def validate_retrieval_state(state: dict) -> tuple[list[str], str]:
 
     return item_names, rewritten_query
 
-# 子函数2 主体过滤表达式构造
 @step_log("build_item_name_expr")
 def build_item_name_expr(item_names: list[str]) -> str:
     """
@@ -50,7 +48,6 @@ def build_item_name_expr(item_names: list[str]) -> str:
     """
     return f"item_name in {item_names}"
 
-# 子函数3 结果标准化
 @step_log("normalize_retrieved_chunk")
 def normalize_retrieved_chunk(chunk: dict) -> dict:
     """
@@ -71,7 +68,6 @@ def normalize_retrieved_chunk(chunk: dict) -> dict:
         "url": None,                                                # 附件URL（无）
     }
 
-# 子函数4 向量查询
 @step_log("search_chunks")
 def search_chunks(
     *,
