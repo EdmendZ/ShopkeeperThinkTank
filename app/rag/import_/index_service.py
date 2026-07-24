@@ -114,13 +114,14 @@ def prepare_chunks_collection() -> None:
     # 准备索引参数
     index_params = milvus_client.prepare_index_params()
 
-    # AUTOINDEX 由 Milvus 选择具体实现；IP（内积）是本集合稠密向量的相似度度量。
-    # 查询本集合时必须使用同样的 IP metric，不能直接套用 HNSW/COSINE 的默认参数。
+    # 稠密向量采用 HNSW 图索引；COSINE 与 BGE-M3 文本向量查询参数保持一致。
+    # M 控制每个节点的最大连接数，efConstruction 控制建图时的候选范围。
     index_params.add_index(
         field_name="dense_vector",
-        index_type="AUTOINDEX",
+        index_type="HNSW",
         index_name="dense_vector_index",
-        metric_type="IP",
+        metric_type="COSINE",
+        params={"M": 64, "efConstruction": 100},
     )
 
     # 为稀疏向量创建索引：使用 SPARSE_INVERTED_INDEX，算法为 DAAT_MAXSCORE
